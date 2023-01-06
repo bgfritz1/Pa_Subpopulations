@@ -1,0 +1,557 @@
+---
+title: "Subpopulations Manuscript Statistical Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+This notebook contains all of the statistical analysis and outputs for the 
+manuscript, "Differentially tolerant and metabolically distinct subpopulations 
+in shaken batch cultures of Pseudomonas aeruginosa", submitted to NBJ Biofilms. 
+
+There are three main experiments in this analysis:
+
+[Growth Phase and Antibiotic Tolerance] 
+
+[Antibiotic Tolerance in Fresh vs. Used Media] 
+
+[Fluorescence of Planktonic and Aggregate Subpopulations] (#anchor)
+
+# Growth Phase and Antibiotic Tolerance
+
+Note: Experiments 1 and 2 were discarded due to experimental errors and inconsistencies with the method. 
+Thus, the analysis in the paper only contains the data from experiments 3-6.   
+
+
+##Statistical Analaysis
+
+```{r, include=FALSE}
+#load libraries 
+library(ggplot2)
+library(plyr)
+library(emmeans)
+library(multcomp)
+library(multcompView)
+library(psych)
+library(knitr)
+library(cowplot)
+library(tidyr)
+library(magick)
+
+
+```
+
+
+#Log Density 
+
+```{r, echo=TRUE}
+#########  Analysis - Growth vs Time ##############
+
+########Log Density and descriptive statistics ############################################################
+
+#Import data
+
+antibiotics.ld <- read.delim("./Data/GrowthPhaseAntibiotics/antibiotics.ld.txt")
+
+#manually remove NAs and extra columns 
+
+antibiotics.ld<-antibiotics.ld[-c(53,239,240,241:249),c(1,2,3,5)]
+
+#Set variables
+
+antibiotics.ld$Time<-as.factor(antibiotics.ld$Time)
+antibiotics.ld$Log.LD<-as.numeric(as.character(antibiotics.ld$Log.LD))
+
+#only experiments 3-6 
+
+antibiotics.ld.sub<-subset(antibiotics.ld,Experiment==3|Experiment==4|Experiment==5|Experiment==6)
+
+##Import summary stats from excel file (im too lazy rn to figure out how to automatically generate) 
+sum.stats<- read.delim("./Data/GrowthPhaseAntibiotics/MLD_and_SE_Exp3to6.txt")
+
+sum.stats$Treatment <- as.factor(sum.stats$Treatment)
+sum.stats$Time <- as.character(sum.stats$Time)
+
+#Change factor names and reorder
+sum.stats$Treatment<-revalue(sum.stats$Treatment,c("0"="Control","1"="Tobramaycin (100 μg/mL) ","2"="Colistin (25 μg/mL)","3"="Tobramycin (100 μg/mL)\nColistin (25 μg/mL)"))
+
+#Colors: 
+colors <- c("#d55e00", "#56b4e9", "#f0e442", "#cc79a7")
+
+#LD plot 
+library(ggplot2)
+
+plt_LD<-
+ggplot(data=sum.stats, aes(x=as.character(Time), y=MLD, fill=Treatment)) +
+  geom_bar(stat="identity", position='dodge')+
+  scale_x_discrete(limits=c("2","4","8","24","48"))+
+  scale_y_continuous(limits=c(0,10),breaks=c(0,2,4,6,8,10))+
+  scale_fill_manual(values = colors)+
+  ggtitle("Mean Log Density vs. Time")+
+  ylab("Mean Log Density (log[CFU/mL])")+
+  xlab("Time(hr)")+
+  theme(axis.title.x = element_text(size=14,face="bold"),
+        axis.title.y = element_text(size=14,face="bold"),
+        title=element_text(size=16,face="bold"),
+        axis.text=element_text(size=14,face="bold"))+
+  geom_bar(position=position_dodge(), stat="identity") +
+  geom_errorbar(aes(ymin=MLD-SE, ymax=MLD+SE),
+                width=.2,                    # Width of the error bars
+                position=position_dodge(.9))+
+  facet_grid(~Treatment)+
+  theme_classic()
+        
+plt_LD
+
+ggsave("./figures/plt_LDvsTime.png", plt_LD, height = 5, width = 9, dpi = 300)
+
+
+
+```
+
+##Statistical analysis - Log Reduction
+
+```{r, echo=TRUE}
+
+# Log Reduction #
+
+#Reading in the files
+
+antibiotics.lr<- read.delim("./Data/GrowthPhaseAntibiotics/antibiotics.lr.txt")
+
+#Remove NA's and extra columns
+
+antibiotics.lr<-antibiotics.lr[1:60,1:4]
+
+#Setting variables to factors
+
+antibiotics.lr$Experiment<-factor(antibiotics.lr$Experiment)
+antibiotics.lr$Treatment<-factor(antibiotics.lr$Treatment)
+antibiotics.lr$Time<-factor(antibiotics.lr$Time)
+
+#make the subset - Experiments 3-6 because the first three had strange results, due to technician error.#
+antibiotics.lr.sub<-subset(antibiotics.lr,Experiment==3|Experiment==4|Experiment==5|Experiment==6)
+
+#Mean log reductions from data 
+antibiotics.lr.stat<-antibiotics.lr.sub[,c(2:4)]
+#describeBy(antibiotics.lr.sub$LR,group=list(antibiotics.lr.stat$Treatment,antibiotics.lr.stat$Time))
+
+
+#Fitting a linear regression to the model 
+lm.lr<-lm(LR~Treatment*Time, data=antibiotics.lr.sub)
+
+#Check model fit 
+
+par(mfrow=c(2,2))
+plot(lm.lr)
+
+#drop1
+drop1(lm.lr,test="F")   # We see that there is a significant effect of the interaction, so we need to look at the effect of time on each treatment, below
+
+#use lsmeans to see where the effect is
+
+
+emm_table<-emmeans(lm.lr,~Treatment|Time)
+
+#test <- pairs(contrast(emm_table))
+
+#cld(test)
+
+#pwpp? plot 
+
+```
+
+
+```{r, echo=TRUE}
+
+
+####### LSmeans plot ##############
+
+
+analysis.data<-cld(lsmeans(lm.lr,~Treatment|Time))
+
+plot.data<-data.frame(analysis.data)
+plot.data$.group[c(8,11)]<-"1,2"
+
+#Change group numbers to letters#
+plot.data$.group[plot.data$.group==" 1"]<-"a"
+plot.data$.group[plot.data$.group==" 1 "]<-"a"
+plot.data$.group[plot.data$.group=="  2"]<-"b"
+plot.data$.group[plot.data$.group=="1,2"]<-"a,b"
+
+
+error.bars<-data.frame(plot.data$upper.CL,plot.data$lower.CL)
+
+colors2 <- c("T1" = "#56b4e9", "T2" = "#f0e442", "T3" = "#cc79a7")
+facet_labels <- as_labeller(c("2" = "Time: 2 hr", "4" = "Time: 4 hr", 
+                              "8" = "Time: 8 hr", "24" = "Time: 24 hr",
+                              "48" = "Time: 48 hr"))
+  
+  
+plt_lsmeans <- 
+ggplot(plot.data, aes(x = Treatment, y = lsmean, color=Treatment)) +
+  scale_color_manual(name="Treatment",
+                       breaks=c("T1", "T2", "T3"),
+                       labels=c("Tobramycin \n(100 μg/mL)", "Colistin \n(25 μg/mL)", "Tobramycin \n(100 μg/mL)\nColistin \n(25 μg/mL)"),
+                       values = colors2)+
+  geom_point(stat='identity',size=4) +
+  scale_y_continuous(limits=c(0,10),breaks=c(0,2,4,6,8,10))+
+  scale_x_discrete(breaks=c("T1","T2","T3"), labels=c("Tob","Col","Combo"))+
+  geom_errorbar(aes(ymin=lower.CL, ymax=upper.CL), width=0.5)+
+  geom_text(data=plot.data, aes(x=Treatment,y=upper.CL+0.5,label=plot.data$.group),color="black")+
+  facet_grid(~Time,scales='free', labeller = facet_labels)+
+  ylab("Mean Log Reduction")+
+  xlab("Treatment")+
+  ggtitle("Pairwise comparisons of Treatment within Time")+
+  theme(axis.text.x = element_text(angle = 45,hjust=1),
+        legend.direction = "horizontal",
+        legend.position = c(0.28, 0.15),
+        legend.box.background = element_rect(colour = "black"),
+        plot.margin = margin(l=40, r = 8, t = 15),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color =  rgb(235, 235, 235, 250, maxColorValue = 255)),
+        text = element_text(size = 10),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+        panel.background = element_rect(fill = "#f8f8f8"),
+        legend.text=element_text(size=6))
+
+plt_lsmeans
+
+
+ggsave("./figures/plt_lmeans.png", plt_lsmeans, width = 8, height = 5)
+```
+
+
+```{r, echo=TRUE}
+
+### P-value plot
+
+plt_pwpp <- 
+  pwpp(emm_table)+
+  scale_color_manual(name="Treatment",
+                     breaks=c("T1", "T2", "T3"),
+                     labels=c("Tobramycin", "Colistin", "Combination"),
+                     values = colors2)+
+  scale_y_discrete(labels = c("Colistin \n(25 μg/mL)",
+                              "Tobramycin \n(100 μg/mL)",
+                              "Tobramycin \n(100 μg/mL)\nColistin \n(25 μg/mL)"
+                              ))+
+  geom_vline(xintercept = 0.05, linetype="dashed", alpha = 0.5)+
+  ggtitle("Pairwise P-value Plot")+
+  theme(axis.text.x = element_text(angle = 60,hjust=1),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color =  rgb(235, 235, 235, 250, maxColorValue = 255)),
+        text = element_text(size = 10),
+        plot.margin = margin(t = 15, r = 8),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+        panel.background = element_rect(fill = "#f8f8f8"),
+       ) +
+  facet_wrap(~Time, labeller = facet_labels, ncol = 5)
+  
+        
+plt_pwpp 
+  
+
+ggsave("./figures/plt_pwpp.png", plt_pwpp, width = 8, height = 5)
+
+#Combined plot 
+
+plt_lsmeans_pwpp <- plot_grid(plt_lsmeans, plt_pwpp, nrow = 2, labels = c("A", "B"))
+
+save_plot("./figures/plt_lsmeans_pwpp.png", plt_lsmeans_pwpp, base_height = 7, base_width = 9)
+
+##plot showing all the points - IN PROGRESS##########
+
+
+# ggplot(antibiotics.lr.sub, aes(x = Treatment, y = LR, color=Treatment)) +
+#   scale_color_discrete(name="Treatment",
+#                        breaks=c("T1", "T2", "T3"),
+#                        labels=c("Tobramycin", "Colistin", "Combination"))+
+#   theme(axis.text.x = element_text(angle = 45,hjust=1))+
+#   geom_bar(stat='identity') +
+#   scale_y_continuous(limits=c(0,10),breaks=c(0,2,4,6,8,10))+
+#   scale_x_discrete(breaks=c("T1","T2","T3"), labels=c("Tob","Col","Combo"))+
+#   geom_errorbar(antibiotics.lr.sub, width=0.2)+                  ####error bars:http://www.ats.ucla.edu/stat/r/pages/ggplot2_errorbar.htm
+#   geom_text(data=plot.data, aes(x=Treatment,y=upper.CL+0.5,label=plot.data$.group),color="black")+
+#   facet_grid(~Time,scales='free')+
+#   ylab("Mean Log Reduction")+
+#   xlab("Treatment")+
+#   ggtitle("Treatment vs Time - Pairwise comparison")
+
+```
+
+
+
+# Antibiotic Tolerance of 24hr in New and Old Media
+
+```{r, echo=T}
+
+#############Statistical Analysis New vs. Old media########################## 
+###############LOG REDUCTION#################################################
+
+#Import the data 
+
+media.lr <- read.delim("./Data/NewOldMediaAntibiotics/Log Reduction.txt")
+
+#Change integers to factors
+
+media.lr$Experiment<-factor(media.lr$Experiment)
+media.lr$Media<-factor(media.lr$Media)
+media.lr$Treatment<-factor(media.lr$Treatment)
+
+library(plyr)
+media.lr$Treatment<-revalue(media.lr$Treatment,c("1"="Tobramycin","2"="Colistin","3"="Tob/Col Combo"))
+
+
+#For Experiment 1, switch Col fr and Col US values around because I must have mislabeled the flasks/plateas
+
+media.lr[3,3]<-"Used"
+media.lr[4,3]<-"Fresh"
+
+#For experiment 3, remove Tob/col used because tech reps dont match
+
+media.lr<-media.lr[-c(17,18),]
+
+
+
+#Fit the model
+m1<-lm(LR~Treatment*Media, data=media.lr)
+
+#Model validation
+
+par(mfrow=c(2,2))
+plot(m1)
+
+
+#Drop1 test for interaction terms
+
+drop1(m1,test="F" )   # Shows significant interaction
+
+#Pairwise analysis of lsmeans 
+library(lsmeans)
+
+emm_table_fresh_used<-emmeans(m1,~Media|Treatment)
+
+pairs(contrast(emm_table_fresh_used))
+
+cld(lsmeans(m1,~Media|Treatment))
+
+plot(lsmeans(m1,~Media|Treatment))
+
+#Some descriptive statistics 
+library(psych)
+desc.stats<-describeBy(media.lr$LR,group=list(media.lr$Treatment,media.lr$Media),mat=T)
+
+
+##Plot 
+library(ggplot2)
+
+analysis.dataB<-cld(lsmeans(m1,~Media|Treatment))
+
+
+plot.dataB<-data.frame(analysis.dataB)
+plot.dataB$.group<-revalue(plot.dataB$.group,c(" 1 "="a","  2"="b"))
+
+
+error.bars<-data.frame(plot.dataB$upper.CL,plot.dataB$lower.CL)
+
+labels<-c("1"="Tobramycin","2"="Colistin","3"="Combination")
+
+ggplot(plot.dataB, aes(x = Media, y = lsmean, color=Treatment)) +
+  geom_point(size = 4) +
+  scale_color_manual(name="Treatment",
+                     breaks=c("1", "2", "3"),
+                     labels=c("Tobramycin", "Colistin", "Combination"),
+                     values = colors2)+
+  scale_y_continuous(limits=c(-2,10),breaks=c(-2,0,2,4,6,8,10))+
+  scale_x_discrete(breaks=c("Fresh","Used"), labels=c("Fresh","Used"))+
+  geom_errorbar(aes(ymin=lower.CL, ymax=upper.CL), width=.1)+
+  geom_text(data=plot.dataB, aes(x=Media,y=upper.CL+0.5,label=plot.dataB$.group),color="black")+
+  facet_grid(~Treatment,scales='free')+
+  ylab("Least-Squares Mean: Log Reduction")+
+  xlab("Media")+
+  ggtitle("Pairwise comparisons of Media within Treatment")+
+  theme(axis.title=element_text(size=14,face="bold"),axis.text=element_text(size=14,face="bold"),
+        plot.title=element_text(size=16,face="bold"))
+
+
+
+
+library(ggpubr)
+
+
+##All LR data 
+
+colors3 <-  c("#56b4e9", "#f0e442", "#cc79a7")
+
+plt_media_LR<-
+ggplot(media.lr, aes(x = Media, y = LR, fill=Treatment)) +
+  geom_boxplot(outlier.alpha = 0) +
+  geom_jitter(color="black", width = 0.1, height = 0, alpha = 0.5)+
+  facet_grid(~Treatment)+
+    scale_fill_manual(name="Treatment",
+                   breaks=c("Tobramycin", "Colistin", "Tob/Col Combo"),
+                   labels=c("Tobramaycin (10 μg/mL) ","Colistin (2.5 μg/mL)","Tobramycin (10 μg/mL)\nColistin (2.5 μg/mL)"),
+                   values = colors3)+
+  labs(y = "Log Reduction", title = "Log Reduction with Used or Fresh Media")+
+    theme(axis.text.x = element_text(angle = 60,hjust=1),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color =  rgb(235, 235, 235, 250, maxColorValue = 255)),
+        text = element_text(size = 10),
+        plot.margin = margin(t = 15, r = 8),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+        panel.background = element_rect(fill = "#f8f8f8"),
+       )
+
+
+
+plt_media_LR
+
+ggsave("./figures/plt_media_LR.png", plt_media_LR, width = 7, height = 5)
+
+
+######################################################## Log Density ###############################################################
+####################################################################################################################################
+
+#import data
+media.ld <- read.delim("./Data/NewOldMediaAntibiotics/Log Density.txt")
+
+#change integers to factors
+media.ld$Experiment<-factor(media.ld$Experiment)
+media.ld$Media<-factor(media.ld$Media)
+media.ld$Treatment<-factor(media.ld$Treatment)
+
+library(plyr)
+media.ld$Treatment<-revalue(media.ld$Treatment,c("0"="Control","1"="Tobramycin","2"="Colistin","3"="Tob/Col Combo"))
+media.ld$Media<-revalue(media.ld$Media,c("0"="Fresh","1"="Used"))
+
+#For Experiment 1, switch Col fr and Col US values around because I must have mislabeled the flasks/plates
+
+media.ld[5,3]<-"Used"
+media.ld[6,3]<-"Fresh"
+
+
+#media.lr<-media.lr[-c(17,18),] 
+
+
+library(psych)
+desc.stats.ld<-describeBy(media.ld$LD,group=list(media.ld$Treatment,media.ld$Media),mat=T)
+desc.stats.ld
+
+colors4 <-  c("#d55e00", "#56b4e9", "#f0e442", "#cc79a7")
+
+###PLot
+plt_media_LD<-
+ggplot(media.ld, aes(x = Media, y = LD, fill=Treatment))+
+  geom_boxplot(outlier.alpha = 0)+
+  geom_jitter(color="black", width = 0.1, height = 0, alpha = 0.5)+
+  scale_y_continuous(limits=c(0,10),breaks=c(0,2,4,6,8,10))+
+  scale_fill_manual(name="Treatment",
+                   breaks=c("Control","Tobramycin", "Colistin", "Tob/Col Combo"),
+                   labels=c("Control","Tobramaycin (100 μg/mL) ","Colistin (25 μg/mL)","Tobramycin (100 μg/mL)\nColistin (25 μg/mL)"),
+                   values = colors4)+
+  ylab("Log Density (log[CFU/mL])")+
+  xlab("Media")+
+  ggtitle("Log Density: Media vs Treatment")+
+  theme(axis.text.x = element_text(angle = 60,hjust=1),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color =  rgb(235, 235, 235, 250, maxColorValue = 255)),
+        text = element_text(size = 10),
+        plot.margin = margin(t = 15, r = 8),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+        panel.background = element_rect(fill = "#f8f8f8"),
+       ) +
+  facet_grid(~Treatment)
+
+plt_media_LD
+
+
+ggsave("./figures/plt_media_LD.png", plt_media_LD, height = 5, width = 7)
+
+
+
+#Combined plot 
+
+plt_media_combined <- 
+plot_grid(plt_media_LD, 
+          plt_media_LR, 
+          nrow = 2, labels = c("A", "B"))
+
+plt_media_combined
+
+save_plot("./figures/plt_media_combined.png", plt_media_combined, base_height = 7, base_width = 9)
+
+
+```
+
+# Difference in Fluorescence Intensity (Plank-Agg)
+
+```{r}
+
+#import the difference data
+
+araGFP.diff <- 
+  read.csv("./Data/Plank_Agg_AraGFP/diffs.csv", header = T) 
+
+araGFP.stats <- 
+    araGFP.diff %>% 
+      pivot_longer(cols = 3:8,
+                   names_to = c("type", "stat"),
+                   names_pattern = "(.*)_(.*)") %>%
+      dplyr::select(sample, type, stat, value)
+
+plt_araGFP_mean<-
+ggplot(subset(araGFP.stats, stat == "mean"), aes(x=type, y = value))+
+  geom_jitter(width=0.1, height=0)+
+  geom_boxplot(width = 0.3, alpha = 0.5, outlier.alpha = 0)+
+  ylim(0,8500)+
+  theme(axis.text.x = element_text(angle = 60,hjust=1),
+       panel.grid.minor = element_blank(),
+       panel.grid.major = element_line(color =  rgb(235, 235, 235, 250, maxColorValue = 255)),
+       text = element_text(size = 10),
+       plot.margin = margin(t = 15, r = 24, l = 24),
+       panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+       panel.background = element_rect(fill = "#f8f8f8"),
+       plot.title = element_text(size=10)
+      ) +
+  labs(y = "Mean Fluorescence Intensity", x = "Subpopulation", 
+       title = "Mean Fluorescence Intensity \nof Single and Aggregated cells")
+    
+plt_araGFP_diff<-
+ggplot(araGFP.diff, aes(x="", y = difference))+
+  geom_jitter(width=0.05, height=0)+
+  geom_boxplot(width=0.1, alpha = 0.5, outlier.alpha = 0)+
+  ylim(-1000,4000)+
+  theme(axis.text.x = element_text(angle = 60,hjust=1),
+       panel.grid.minor = element_blank(),
+       panel.grid.major = element_line(color =  rgb(235, 235, 235, 250, maxColorValue = 255)),
+       text = element_text(size = 10),
+       plot.margin = margin(t = 15, r = 24, b = 13, l = 24),
+       panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+       panel.background = element_rect(fill = "#f8f8f8"),
+       plot.title = element_text(size=10)
+      ) +
+  labs(y = "Difference in mean Fluorescence Intensity \n(Single Cells - Aggregates)", x = "Difference", 
+     title = "Difference in Mean Fluorescence Intensity \nbetween Single and Aggregated Cells")
+
+
+plt_mask_example <- 
+ggdraw() + 
+  draw_image("./figures/plank_agg_example.png")
+
+bottom_row <- plot_grid(plt_araGFP_mean, plt_araGFP_diff, labels = c("B", "C"))
+
+plt_gfp_combined <- plot_grid(plt_mask_example, bottom_row, nrow = 2, 
+                              labels = c("A", NULL), rel_heights = c(0.5, 0.5), 
+                              align = "hv")
+
+save_plot("./figures/plt_gfp_combined.png", plt_gfp_combined, base_height = 7, base_width = 9)
+
+
+```
+
+
+
+
+
+
